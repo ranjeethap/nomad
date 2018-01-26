@@ -100,6 +100,10 @@ type Client struct {
 	config *config.Config
 	start  time.Time
 
+	// fingerprinters is a list of a client's periodic fingerprinters.
+	// TODO this will later be moved to a driver manager
+	fingerprinters map[string]fingerprint.Fingerprint
+
 	// stateDB is used to efficiently store client state.
 	stateDB *bolt.DB
 
@@ -197,6 +201,7 @@ func NewClient(cfg *config.Config, consulCatalog consul.CatalogAPI, consulServic
 		servers:             newServerList(),
 		triggerDiscoveryCh:  make(chan struct{}),
 		serversDiscoveredCh: make(chan struct{}),
+		fingerprinters:      make(map[string]fingerprint.Fingerprint),
 	}
 
 	// Initialize the client
@@ -969,6 +974,7 @@ func (c *Client) fingerprint() error {
 			// TODO: If more periodic fingerprinters are added, then
 			// fingerprintPeriodic should be used to handle all the periodic
 			// fingerprinters by using a priority queue.
+			c.fingerprinters[name] = f
 			go c.fingerprintPeriodic(name, f, period)
 		}
 	}
@@ -1044,6 +1050,7 @@ func (c *Client) setupDrivers() error {
 
 		p, period := d.Periodic()
 		if p {
+			c.fingerprinters[name] = d
 			go c.fingerprintPeriodic(name, d, period)
 		}
 
@@ -1062,11 +1069,18 @@ func (c *Client) setupDrivers() error {
 func (c *Client) updateNodeFromFingerprint(response *cstructs.FingerprintResponse) {
 	c.configLock.Lock()
 	defer c.configLock.Unlock()
+	c.logger.Printf("RESPONSE ATTRIBUTES %+v", response.GetAttributes())
 	for name, val := range response.GetAttributes() {
 		if val == "" {
+			if name == "driver.mock_driver" {
+				c.logger.Printf("REMOVING MOCK ADDR ATTRIBUTE")
+			}
 			delete(c.config.Node.Attributes, name)
 		} else {
 			c.config.Node.Attributes[name] = val
+			if name == "driver.mock_driver" {
+				c.logger.Printf("ADDING MOCK ADDR ATTRIBUTE")
+			}
 		}
 	}
 

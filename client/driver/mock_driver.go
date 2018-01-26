@@ -16,7 +16,6 @@ import (
 	"github.com/mitchellh/mapstructure"
 
 	dstructs "github.com/hashicorp/nomad/client/driver/structs"
-	"github.com/hashicorp/nomad/client/fingerprint"
 	cstructs "github.com/hashicorp/nomad/client/structs"
 	"github.com/hashicorp/nomad/nomad/structs"
 )
@@ -77,7 +76,10 @@ type MockDriverConfig struct {
 // MockDriver is a driver which is used for testing purposes
 type MockDriver struct {
 	DriverContext
-	fingerprint.StaticFingerprinter
+
+	// IsShutdown is Used purely for testing purposes in order to validate
+	// periodic fingerprint changes are picked up by the client and set on the node
+	IsShutdown bool
 
 	cleanupFailNum int
 }
@@ -194,7 +196,12 @@ func (m *MockDriver) Validate(map[string]interface{}) error {
 
 // Fingerprint fingerprints a node and returns if MockDriver is enabled
 func (m *MockDriver) Fingerprint(req *cstructs.FingerprintRequest, resp *cstructs.FingerprintResponse) error {
-	resp.AddAttribute("driver.mock_driver", "1")
+	switch {
+	case m.IsShutdown:
+		resp.RemoveAttribute("driver.mock_driver")
+	default:
+		resp.AddAttribute("driver.mock_driver", "1")
+	}
 	return nil
 }
 
@@ -337,4 +344,9 @@ func (h *mockDriverHandle) run() {
 			return
 		}
 	}
+}
+
+// When testing, poll for updates
+func (m *MockDriver) Periodic() (bool, time.Duration) {
+	return true, 1 * time.Second
 }
